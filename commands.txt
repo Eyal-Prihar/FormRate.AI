@@ -1,0 +1,11 @@
+Generate Analysis on video:
+python3 formrate.py --video [INSERTVIDEONAME].mp4 --exercise squat
+
+Download video:
+
+
+python3 formrate.py --video "video-files/your_video_name.mp4" --exercise squat
+
+
+python3 formrate.py --video "video-files/m2-res_1440p.mp4" --exercise squat
+

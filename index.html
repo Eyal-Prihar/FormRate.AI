@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FormRate.ai</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: #f5f4f0;
+    color: #1a1a18;
+    min-height: 100vh;
+  }
+  #root { display: flex; justify-content: center; padding: 2.5rem 1rem 4rem; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useCallback } = React;
+
+const API_BASE = "http://localhost:8000";
+
+/* ── tiny design tokens ── */
+const C = {
+  card: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.1)", borderRadius: 12 },
+  surface: { background: "#eeeee9", borderRadius: 8 },
+  blue: { bg: "#e6f1fb", text: "#185fa5", border: "#b5d4f4" },
+  green: { bg: "#eaf3de", text: "#3b6d11" },
+  amber: { bg: "#faeeda", text: "#854f0b" },
+  red: { bg: "#fcebeb", text: "#a32d2d" },
+  muted: "#6b6b67",
+  border: "rgba(0,0,0,0.1)",
+};
+
+function scoreColor(s) {
+  if (s >= 8) return C.green;
+  if (s >= 6) return C.amber;
+  return C.red;
+}
+
+/* ────────────────────────────────────────────────
+   UPLOAD SCREEN
+─────────────────────────────────────────────────*/
+function UploadScreen({ onAnalyze }) {
+  const [file, setFile] = useState(null);
+  const [exercise, setExercise] = useState("squat");
+  const [drag, setDrag] = useState(false);
+  const inputRef = useRef();
+
+  const handleFile = f => { if (f && f.type.startsWith("video/")) setFile(f); };
+
+  const onDrop = useCallback(e => {
+    e.preventDefault(); setDrag(false);
+    handleFile(e.dataTransfer.files[0]);
+  }, []);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 580 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 500, marginBottom: 4 }}>FormRate.ai</h1>
+      <p style={{ fontSize: 14, color: C.muted, marginBottom: 28 }}>
+        Upload a video and get an AI-powered form assessment
+      </p>
+
+      {/* drop zone */}
+      <div
+        onClick={() => inputRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={onDrop}
+        style={{
+          ...C.card,
+          padding: "2.5rem 2rem", textAlign: "center", cursor: "pointer",
+          background: drag ? "#eeeee9" : file ? "#f0f7ff" : "#fff",
+          border: drag ? "1.5px dashed #378add" : file ? "1.5px solid #378add" : "1.5px dashed rgba(0,0,0,0.18)",
+          transition: "all 0.15s",
+        }}
+      >
+        <input ref={inputRef} type="file" accept="video/*" style={{ display: "none" }}
+          onChange={e => { handleFile(e.target.files[0]); e.target.value = ""; }} />
+
+        {file ? (
+          <>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>🎬</div>
+            <p style={{ fontWeight: 500, fontSize: 15 }}>{file.name}</p>
+            <p style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>
+              {(file.size / 1024 / 1024).toFixed(1)} MB — click to change
+            </p>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 36, marginBottom: 10, opacity: 0.35 }}>⬆</div>
+            <p style={{ fontWeight: 500, fontSize: 15 }}>Drop your video here</p>
+            <p style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>
+              MP4, MOV, AVI — full body visible in frame
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* exercise picker */}
+      <p style={{ fontSize: 13, fontWeight: 500, color: C.muted, margin: "20px 0 8px" }}>Exercise</p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 24 }}>
+        {["squat", "deadlift", "bench"].map(ex => (
+          <button key={ex} onClick={() => setExercise(ex)} style={{
+            padding: "10px 0", borderRadius: 8, cursor: "pointer", fontSize: 14,
+            fontWeight: exercise === ex ? 500 : 400,
+            border: exercise === ex ? "1.5px solid #378add" : "0.5px solid rgba(0,0,0,0.12)",
+            background: exercise === ex ? "#e6f1fb" : "#fff",
+            color: exercise === ex ? "#185fa5" : "#1a1a18",
+            transition: "all 0.1s",
+          }}>
+            {ex.charAt(0).toUpperCase() + ex.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <button
+        disabled={!file}
+        onClick={() => onAnalyze(file, exercise)}
+        style={{
+          width: "100%", padding: 13, borderRadius: 8, border: "none",
+          background: file ? "#1a1a18" : "#ccc", color: "#fff",
+          fontSize: 15, fontWeight: 500, cursor: file ? "pointer" : "not-allowed",
+          transition: "opacity 0.15s",
+        }}
+      >
+        Analyze form
+      </button>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   PROGRESS SCREEN
+─────────────────────────────────────────────────*/
+const STEPS = [
+  "Extracting pose landmarks",
+  "Detecting rep boundaries",
+  "Scoring biomechanics",
+  "Building coaching report",
+];
+
+function ProgressScreen({ file, exercise, onDone, onError }) {
+  const [step, setStep] = useState(0);
+  const [pct, setPct] = useState(0);
+  const started = useRef(false);
+
+  React.useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+
+    // Fake step animation while real fetch runs
+    const intervals = [0, 800, 1800, 2800];
+    intervals.forEach((delay, i) => {
+      setTimeout(() => {
+        setStep(i);
+        setPct(Math.round((i + 1) / STEPS.length * 85));
+      }, delay);
+    });
+
+    const fd = new FormData();
+    fd.append("video", file);
+    fd.append("exercise", exercise);
+
+    fetch(`${API_BASE}/analyze`, { method: "POST", body: fd })
+      .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.detail || r.statusText); });
+        return r.json();
+      })
+      .then(data => { setPct(100); setTimeout(() => onDone(data), 400); })
+      .catch(err => onError(err.message));
+  }, []);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 580 }}>
+      <h1 style={{ fontSize: 18, fontWeight: 500, marginBottom: 4 }}>Analyzing your form</h1>
+      <p style={{ fontSize: 13, color: C.muted, marginBottom: 28 }}>
+        {file.name} · {exercise}
+      </p>
+
+      {/* progress bar */}
+      <div style={{ height: 4, background: "rgba(0,0,0,0.08)", borderRadius: 2, overflow: "hidden", marginBottom: 8 }}>
+        <div style={{
+          height: "100%", background: "#378add", borderRadius: 2,
+          width: pct + "%", transition: "width 0.5s ease",
+        }} />
+      </div>
+      <p style={{ fontSize: 13, color: C.muted, marginBottom: 28 }}>{STEPS[step]}...</p>
+
+      {/* steps */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {STEPS.map((s, i) => {
+          const done = i < step;
+          const active = i === step;
+          return (
+            <div key={s} style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 14,
+              color: done ? "#1a1a18" : active ? "#378add" : C.muted }}>
+              <div style={{
+                width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: done ? "#1d9e75" : active ? "#e6f1fb" : "transparent",
+                border: done ? "none" : active ? "1.5px solid #378add" : "1.5px solid rgba(0,0,0,0.15)",
+                fontSize: 10, color: done ? "#fff" : "#378add",
+              }}>
+                {done ? "✓" : active ? "●" : ""}
+              </div>
+              {s}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   RESULTS SCREEN
+─────────────────────────────────────────────────*/
+function ScoreRing({ score }) {
+  const r = 42;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (score / 10) * circ;
+  const col = score >= 8 ? "#1d9e75" : score >= 6 ? "#ef9f27" : "#e24b4a";
+  return (
+    <svg width={100} height={100} viewBox="0 0 100 100">
+      <circle cx={50} cy={50} r={r} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={8} />
+      <circle cx={50} cy={50} r={r} fill="none" stroke={col} strokeWidth={8}
+        strokeDasharray={circ} strokeDashoffset={offset}
+        strokeLinecap="round" transform="rotate(-90 50 50)"
+        style={{ transition: "stroke-dashoffset 1s ease" }} />
+    </svg>
+  );
+}
+
+function RepCard({ rs }) {
+  const [open, setOpen] = useState(false);
+  const col = scoreColor(rs.score);
+  return (
+    <div style={{ ...C.card, overflow: "hidden" }}>
+      <div onClick={() => setOpen(o => !o)} style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "12px 16px", cursor: "pointer",
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 500 }}>Rep {rs.rep_number}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{
+            fontSize: 13, fontWeight: 500, padding: "3px 10px", borderRadius: 6,
+            background: col.bg, color: col.text,
+          }}>{rs.score.toFixed(1)}/10</span>
+          <span style={{
+            fontSize: 12, color: C.muted,
+            transform: open ? "rotate(180deg)" : "rotate(0deg)", display: "inline-block", transition: "transform 0.2s",
+          }}>▼</span>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 16px 14px" }}>
+          {rs.checks.map(ch => (
+            <div key={ch.name} style={{
+              display: "flex", alignItems: "flex-start", gap: 10,
+              padding: "7px 0", borderTop: `0.5px solid ${C.border}`, fontSize: 13,
+            }}>
+              <div style={{
+                width: 18, height: 18, borderRadius: "50%", flexShrink: 0, marginTop: 1,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 500,
+                background: ch.passed ? C.green.bg : C.red.bg,
+                color: ch.passed ? C.green.text : C.red.text,
+              }}>{ch.passed ? "✓" : "✗"}</div>
+              <div>
+                <div>
+                  <span style={{ fontWeight: 500 }}>{ch.name.replace(/_/g, " ")}</span>
+                  {ch.value != null && (
+                    <span style={{ color: C.muted, marginLeft: 6 }}>[{ch.value}]</span>
+                  )}
+                </div>
+                {!ch.passed && ch.feedback && (
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{ch.feedback}</div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {rs.raw_angles && Object.keys(rs.raw_angles).length > 0 && (
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ fontSize: 12, color: C.muted, cursor: "pointer" }}>Raw angles</summary>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {Object.entries(rs.raw_angles).filter(([, v]) => v != null).map(([k, v]) => (
+                  <span key={k} style={{
+                    fontSize: 11, padding: "2px 8px", borderRadius: 4,
+                    background: "#f1efe8", color: "#5f5e5a",
+                  }}>{k.replace(/_/g, " ")}: {v}°</span>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VideoPlayer({ file }) {
+  const videoUrl = React.useMemo(() => URL.createObjectURL(file), [file]);
+  React.useEffect(() => () => URL.revokeObjectURL(videoUrl), [videoUrl]);
+  return (
+    <div style={{ ...C.card, overflow: "hidden", marginBottom: "1.5rem" }}>
+      <video
+        src={videoUrl}
+        controls
+        playsInline
+        style={{ width: "100%", display: "block", maxHeight: 400, background: "#000" }}
+      />
+      <div style={{ padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 13, color: C.muted }}>{file.name}</span>
+        <span style={{ fontSize: 12, color: C.muted }}>{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+      </div>
+    </div>
+  );
+}
+
+function ResultsScreen({ data, file, onReset }) {
+  const best = data.rep_scores.length ? Math.max(...data.rep_scores.map(r => r.score)) : 0;
+  const totalChecks = data.rep_scores.reduce((a, r) => a + r.checks.length, 0);
+  const passedChecks = data.rep_scores.reduce((a, r) => a + r.checks.filter(c => c.passed).length, 0);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 580 }}>
+
+      {file && <VideoPlayer file={file} />}
+
+      {/* score hero */}
+      <div style={{ textAlign: "center", padding: "1.5rem 0 1rem" }}>
+        <ScoreRing score={data.overall_score} />
+        <div style={{ fontSize: 30, fontWeight: 500, marginTop: 8 }}>
+          {data.overall_score.toFixed(1)} / 10
+        </div>
+        <div style={{ fontSize: 14, color: C.muted, marginTop: 4 }}>
+          {data.exercise.charAt(0).toUpperCase() + data.exercise.slice(1)} · overall score
+        </div>
+      </div>
+
+      {/* metric cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, margin: "1.5rem 0" }}>
+        {[
+          ["Reps detected", data.total_reps],
+          ["Best rep", best.toFixed(1) + "/10"],
+          ["Checks passed", `${passedChecks}/${totalChecks}`],
+        ].map(([lbl, val]) => (
+          <div key={lbl} style={{ ...C.surface, padding: "12px 14px" }}>
+            <div style={{ fontSize: 20, fontWeight: 500 }}>{val}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{lbl}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* coaching cues */}
+      {data.overall_feedback.length > 0 && (
+        <div style={{
+          background: C.blue.bg, border: `0.5px solid ${C.blue.border}`,
+          borderRadius: 8, padding: "14px 16px", marginBottom: "1.5rem",
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: C.blue.text, marginBottom: 10 }}>
+            Top coaching cues
+          </div>
+          {data.overall_feedback.slice(0, 3).map((cue, i) => (
+            <div key={i} style={{
+              fontSize: 13, color: "#0c447c", padding: "5px 0",
+              borderTop: i > 0 ? `0.5px solid ${C.blue.border}` : "none",
+              display: "flex", gap: 8,
+            }}>
+              <span style={{ flexShrink: 0 }}>→</span>{cue}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* rep breakdown */}
+      <p style={{ fontSize: 13, fontWeight: 500, color: C.muted, marginBottom: 10 }}>
+        Rep breakdown
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {data.rep_scores.map(rs => <RepCard key={rs.rep_number} rs={rs} />)}
+      </div>
+
+      <button onClick={onReset} style={{
+        width: "100%", marginTop: "1.5rem", padding: 11, borderRadius: 8,
+        background: "transparent", border: "0.5px solid rgba(0,0,0,0.15)",
+        fontSize: 14, cursor: "pointer", color: "#1a1a18",
+      }}>
+        Analyze another video
+      </button>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   ERROR BANNER
+─────────────────────────────────────────────────*/
+function ErrorBanner({ message, onDismiss }) {
+  return (
+    <div style={{
+      width: "100%", maxWidth: 580,
+      background: C.red.bg, border: `0.5px solid #f09595`,
+      borderRadius: 8, padding: "14px 16px", marginBottom: "1rem",
+      display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
+    }}>
+      <div>
+        <div style={{ fontWeight: 500, fontSize: 14, color: C.red.text, marginBottom: 4 }}>Analysis failed</div>
+        <div style={{ fontSize: 13, color: C.red.text }}>{message}</div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
+          Make sure the FastAPI server is running: <code style={{ background: "rgba(0,0,0,0.06)", padding: "1px 5px", borderRadius: 4 }}>uvicorn api:app --reload --port 8000</code>
+        </div>
+      </div>
+      <button onClick={onDismiss} style={{
+        flexShrink: 0, background: "none", border: "none", cursor: "pointer",
+        fontSize: 18, color: C.red.text, lineHeight: 1,
+      }}>×</button>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────
+   APP ROOT
+─────────────────────────────────────────────────*/
+function App() {
+  const [screen, setScreen] = useState("upload");  // upload | progress | results
+  const [uploadState, setUploadState] = useState({ file: null, exercise: "squat" });
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+
+  function handleAnalyze(file, exercise) {
+    setError(null);
+    setUploadState({ file, exercise });
+    setScreen("progress");
+  }
+
+  function handleDone(data) {
+    setResults(data);
+    setScreen("results");
+  }
+
+  function handleError(msg) {
+    setError(msg);
+    setScreen("upload");
+  }
+
+  function reset() {
+    setScreen("upload");
+    setResults(null);
+    setError(null);
+    setUploadState({ file: null, exercise: "squat" });
+  }
+
+  return (
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+      {error && <ErrorBanner message={error} onDismiss={() => setError(null)} />}
+
+      {screen === "upload" && <UploadScreen onAnalyze={handleAnalyze} />}
+      {screen === "progress" && (
+        <ProgressScreen
+          file={uploadState.file}
+          exercise={uploadState.exercise}
+          onDone={handleDone}
+          onError={handleError}
+        />
+      )}
+      {screen === "results" && results && (
+        <ResultsScreen data={results} file={uploadState.file} onReset={reset} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
