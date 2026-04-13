@@ -1,0 +1,10 @@
+pose_landmarker.task
+*.mp4
+*.mov
+*.avi
+*.mkv
+video-files/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
