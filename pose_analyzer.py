@@ -111,6 +111,67 @@ def extract_angles(lm: dict) -> dict:
             if abs(hip_ankle_x) > 1e-4:
                 angles[f"{side.lower()}_knee_valgus_ratio"] = (knee[0] - hip[0]) / hip_ankle_x
 
+    # ── Stance width ratio ────────────────────────────────────────────────
+    # Ratio of hip-to-hip distance vs ankle-to-ankle distance (normalized
+    # to image width). >1.0 = wider than hips (sumo-ish), ~1.0 = hip width,
+    # <0.7 = narrow/close stance.
+    lhip  = get_landmark_coords(lm, "LEFT_HIP")
+    rhip  = get_landmark_coords(lm, "RIGHT_HIP")
+    lank  = get_landmark_coords(lm, "LEFT_ANKLE")
+    rank  = get_landmark_coords(lm, "RIGHT_ANKLE")
+    if all(v is not None for v in [lhip, rhip, lank, rank]):
+        hip_width   = abs(lhip[0] - rhip[0]) + 1e-6
+        ankle_width = abs(lank[0] - rank[0])
+        angles["stance_width_ratio"] = ankle_width / hip_width
+
+    # ── Toe flare angle ───────────────────────────────────────────────────
+    # Angle between heel→toe_index vector and the forward (vertical) axis.
+    # 0° = toes pointing straight forward, 30–45° = typical squat flare.
+    # We compute per foot and store both.
+    for side, heel_name, toe_name in [
+        ("left",  "LEFT_HEEL",  "LEFT_FOOT_INDEX"),
+        ("right", "RIGHT_HEEL", "RIGHT_FOOT_INDEX"),
+    ]:
+        heel = get_landmark_coords(lm, heel_name)
+        toe  = get_landmark_coords(lm, toe_name)
+        if heel is not None and toe is not None:
+            dx = toe[0] - heel[0]
+            dy = toe[1] - heel[1]   # positive = downward in image coords
+            # Angle relative to the image vertical axis (pointing down = 0°)
+            toe_angle = float(np.degrees(np.arctan2(abs(dx), abs(dy) + 1e-6)))
+            angles[f"{side}_toe_flare"] = toe_angle
+
+    # ── Bar position (wrist–shoulder–hip alignment) ───────────────────────
+    # Proxy for barbell placement: if wrists are near shoulder height and
+    # close together behind the neck → high-bar or low-bar squat.
+    # We store:
+    #   bar_detected       : 1.0 if wrists are near trap/shoulder region, else 0.0
+    #   bar_height_ratio   : wrist_y / shoulder_y  (~1.0 = on traps, <0.8 = arms raised)
+    #   bar_lateral_offset : abs difference in wrist x-coords (normalized by shoulder width)
+    #                        small = bar level/even, large = bar tilted
+    lw = get_landmark_coords(lm, "LEFT_WRIST")
+    rw = get_landmark_coords(lm, "RIGHT_WRIST")
+    ls = get_landmark_coords(lm, "LEFT_SHOULDER")
+    rs = get_landmark_coords(lm, "RIGHT_SHOULDER")
+    if all(v is not None for v in [lw, rw, ls, rs]):
+        avg_wrist_y    = (lw[1] + rw[1]) / 2
+        avg_shoulder_y = (ls[1] + rs[1]) / 2
+        shoulder_width = abs(ls[0] - rs[0]) + 1e-6
+        wrist_width    = abs(lw[0] - rw[0])
+        bar_height_ratio   = avg_wrist_y / (avg_shoulder_y + 1e-6)
+        bar_lateral_offset = abs(lw[1] - rw[1]) / shoulder_width  # vertical asymmetry
+
+        # Barbell detected if wrists are roughly at or below shoulder height
+        # and arms are wider than shoulder width (hands gripping bar out wide)
+        bar_detected = 1.0 if (
+            0.8 <= bar_height_ratio <= 1.35 and
+            wrist_width >= shoulder_width * 0.8
+        ) else 0.0
+
+        angles["bar_detected"]        = bar_detected
+        angles["bar_height_ratio"]    = bar_height_ratio
+        angles["bar_lateral_offset"]  = bar_lateral_offset
+
     return angles
 
 

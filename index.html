@@ -24,7 +24,8 @@
 <script type="text/babel">
 const { useState, useRef, useCallback } = React;
 
-const API_BASE = "https://retain-conceptual-city-len.trycloudflare.com";
+const VERSION = "1.0.1";
+const API_BASE = "http://localhost:8000";
 
 /* ── tiny design tokens ── */
 const C = {
@@ -474,6 +475,15 @@ function App() {
       {screen === "results" && results && (
         <ResultsScreen data={results} file={uploadState.file} onReset={reset} />
       )}
+
+      <div style={{
+        position: "fixed", bottom: 14, right: 16,
+        fontSize: 11, color: "rgba(0,0,0,0.25)",
+        fontFamily: "monospace", letterSpacing: "0.02em",
+        pointerEvents: "none", userSelect: "none",
+      }}>
+        v{VERSION}
+      </div>
     </div>
   );
 }
